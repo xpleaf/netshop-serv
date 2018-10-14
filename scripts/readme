@@ -1,0 +1,7 @@
+本地开发环境说明：
+1.依赖hadoop环境
+start-dfs.sh
+start-yarn.sh
+
+2.依赖hive环境
+本地数据库需要开启，因为元数据信息保存在mysql上。
