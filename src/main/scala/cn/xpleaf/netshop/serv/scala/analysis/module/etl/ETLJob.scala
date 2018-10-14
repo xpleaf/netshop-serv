@@ -12,6 +12,7 @@ object ETLJob {
 
     def main(args: Array[String]): Unit = {
         val conf = new SparkConf()
+            .setMaster("local[2]")  // 本地测试时打开
             .setAppName(s"${ETLJob.getClass.getSimpleName}")
         val sc = new SparkContext(conf)
 
@@ -62,8 +63,12 @@ object ETLJob {
         // 3.设置external_user_visit_session的数据位置
         // 需要指定绝对路径，否则会报错： {0}  is not absolute or has no scheme information.
         // Please specify a complete absolute uri with scheme information
+/*        val sql3 = s"""alter table external_user_visit_session
+            set location 'hdfs://ns1/logs/netshop/${year}/${month}/${day}'"""*/
+        // 本地测试用下面的，连接本地的集群，注意不加配置文件hdfs-site.xml和core-site.xml的话，会报错：
+        // java.io.IOException Incomplete HDFS URI, no host: hdfs:///logs/netshop/2018/10/14
         val sql3 = s"""alter table external_user_visit_session
-            set location 'hdfs://ns1/logs/netshop/${year}/${month}/${day}'"""
+            set location 'hdfs:///logs/netshop/${year}/${month}/${day}'"""
         hiveContext.sql(sql3).show()
 
 
