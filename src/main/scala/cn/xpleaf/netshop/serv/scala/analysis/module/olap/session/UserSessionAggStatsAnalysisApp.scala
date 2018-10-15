@@ -1,5 +1,10 @@
 package cn.xpleaf.netshop.serv.scala.analysis.module.olap.session
 
+import cn.xpleaf.netshop.serv.java.analysis.dao.{ITaskDao, TaskDaoImpl}
+import cn.xpleaf.netshop.serv.java.analysis.domain.Task
+import cn.xpleaf.netshop.serv.java.analysis.utils.ParamUtil
+import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.{DataFrame, Row}
 import org.apache.spark.sql.hive.HiveContext
 import org.apache.spark.{SparkConf, SparkContext}
 import org.slf4j.{Logger, LoggerFactory}
@@ -62,13 +67,39 @@ object UserSessionAggStatsAnalysisApp {
         val hiveContext = new HiveContext(sc)
 
         // 读取taskID对应的配置信息
+        val taskDao:ITaskDao = new TaskDaoImpl()
+        val task:Task = taskDao.getTaskById(taskID)
+        val paramJson:String = task.getTask_param
 
-
+        // 1.初步做时间范围内数据的筛选
+        val sessionRowRDD:RDD[Row] = getRangeSessionRDD(hiveContext, paramJson)
 
 
         // 关闭SparkContext
         sc.stop()
 
+    }
+
+    /**
+      * 初步做时间范围内数据的筛选
+      */
+    def getRangeSessionRDD(hiveContext: HiveContext, paramJson:String):RDD[Row] = {
+        // 拿到计算的时间范围，注意查询时间范围，hive中的user_visit_session表，the_date的格式为yyyy-MM-dd
+        // 不支持后面查询有具体时间的，因为其在hive中是以partition的格式进行存储的
+        val startDate:String = ParamUtil.getValueByKey(paramJson, "startDate").toString
+        val endDate:String = ParamUtil.getValueByKey(paramJson, "endDate").toString
+        // 生成sql语句
+        val sql:String =
+            s"""
+              |select *
+              |from user_visit_session
+              |where the_date>='$startDate' and the_date<='$endDate'
+            """.stripMargin
+        // 使用netshop这个库，否则下面的查询没有作用
+        hiveContext.sql("use netshop")
+        // 向hive中查询
+        val df:DataFrame = hiveContext.sql(sql)
+        df.rdd
     }
 
 }
