@@ -73,6 +73,35 @@ object UserSessionAggStatsAnalysisApp {
 
         // 1.初步做时间范围内数据的筛选
         val sessionRowRDD:RDD[Row] = getRangeSessionRDD(hiveContext, paramJson)
+        println("-------------------------->sessionRowRDD's size: " + sessionRowRDD.count())
+        //--------------------------------------------------------------------------------------------//
+
+        /**
+          * 2.将上述生成的sessionRowRDD转换为sessionId2ActionRDD
+          * k,v
+          * k：sessionId
+          * v：row表示的action操作
+          */
+        val sessionId2ActionRDD:RDD[(String, Row)] = sessionRowRDD.map{
+            case row => (row.getAs("session_id"), row)
+        }
+        println("-------------------------->sessionId2ActionRDD's size: " + sessionId2ActionRDD.count())
+        //--------------------------------------------------------------------------------------------//
+
+        /**
+          * 3.将相同sessionId的row拉取到一起，形成sessionId2ActionsRDD
+          * k,v
+          * k：sessionId
+          * v：Iterable[Row]
+          * 表示将一次用户session的所有操作都聚合到一起
+          * 问题：这里是否需要进行数据倾斜调优，因为是使用groupByKey进行操作？
+          * 不需要，因为一次用户session，即便每秒点击一次，一天24小时点击，一天就86400次
+          * 当然，不可能该用户连续一个月或者几个月都这样不停地点击，所以这里暂时不考虑调优
+          * 如果需要的话，也说得过去吧，只是目前没有这个必要，调优的直接参考之前的文档即可
+          */
+        val sessionIdsActionsRDD:RDD[(String, Iterable[Row])] = sessionId2ActionRDD.groupByKey()
+        println("-------------------------->sessionIdsActionsRDD's size: " + sessionIdsActionsRDD.count())
+        //--------------------------------------------------------------------------------------------//
 
 
         // 关闭SparkContext
