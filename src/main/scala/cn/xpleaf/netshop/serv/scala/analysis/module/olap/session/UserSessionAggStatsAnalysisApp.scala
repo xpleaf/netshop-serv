@@ -103,10 +103,35 @@ object UserSessionAggStatsAnalysisApp {
         println("-------------------------->sessionIdsActionsRDD's size: " + sessionId2ActionsRDD.count())
         //--------------------------------------------------------------------------------------------//
 
+        /**
+          * 4.将sessionId2ActionsRDD转换为userId2PartAggInfoRDD
+          * k,v
+          * k：userId
+          * v：row的聚合字符串表示partAggInfo
+          * 其实就是将用户一次session操作（因为sessionId2ActionsRDD就是根据sessionId进行聚合）的信息聚合起来
+          * a9ae622b4b8b43379b79184d2e36927e,row
+          * a9ae622b4b8b43379b79184d2e36927e,row
+          * a9ae622b4b8b43379b79184d2e36927e,row
+          * row中有userId，那么userId肯定是一样的，用来标识某一用户，所以k就为userId，
+          * 那么v，就是上面所有row的聚合信息，处理为字符串，如：searchKeys='杀猪菜','芳华','前任3'|order_category_ids=1,2,3,
+          *
+          * 从上面的思路可以知道，最后出来的userId2PartAggInfoRDD，k相同即userId相同的RDD可能会有多个，
+          * 但这也是正常的，一份userId的RDD，就代表一次用户session会话，多份userId相同的RDD，就代表多次用户session会话
+          * 那为什么是partAggInfo呢？因为这时我们的RDD还没有用户信息，这个后面会再做处理
+          */
+        val userId2PartAggInfoRDD:RDD[(String, String)]= getUserId2PartAggInfoRDD(hiveContext, sessionId2ActionRDD)
+
 
         // 关闭SparkContext
         sc.stop()
 
+    }
+
+    /**
+      * 将sessionId2ActionsRDD转换为userId2PartAggInfoRDD
+      */
+    def getUserId2PartAggInfoRDD(context: HiveContext, value: RDD[(String, Row)]):RDD[(String, String)] = {
+        null
     }
 
     /**
