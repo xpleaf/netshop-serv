@@ -34,7 +34,7 @@ public class DateUtils {
 				return true;
 			}
 		} catch (Exception e) {
-			e.printStackTrace();
+			// e.printStackTrace();
 		}
 		return false;
 	}
@@ -54,7 +54,7 @@ public class DateUtils {
 				return true;
 			}
 		} catch (Exception e) {
-			e.printStackTrace();
+			// e.printStackTrace();
 		}
 		return false;
 	}
@@ -74,7 +74,7 @@ public class DateUtils {
 			
 			return Integer.valueOf(String.valueOf(millisecond / 1000));  
 		} catch (Exception e) {
-			e.printStackTrace();
+			// e.printStackTrace();
 		}
 		return 0;
 	}
