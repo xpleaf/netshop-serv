@@ -99,8 +99,8 @@ object UserSessionAggStatsAnalysisApp {
           * 当然，不可能该用户连续一个月或者几个月都这样不停地点击，所以这里暂时不考虑调优
           * 如果需要的话，也说得过去吧，只是目前没有这个必要，调优的直接参考之前的文档即可
           */
-        val sessionIdsActionsRDD:RDD[(String, Iterable[Row])] = sessionId2ActionRDD.groupByKey()
-        println("-------------------------->sessionIdsActionsRDD's size: " + sessionIdsActionsRDD.count())
+        val sessionId2ActionsRDD:RDD[(String, Iterable[Row])] = sessionId2ActionRDD.groupByKey()
+        println("-------------------------->sessionIdsActionsRDD's size: " + sessionId2ActionsRDD.count())
         //--------------------------------------------------------------------------------------------//
 
 
