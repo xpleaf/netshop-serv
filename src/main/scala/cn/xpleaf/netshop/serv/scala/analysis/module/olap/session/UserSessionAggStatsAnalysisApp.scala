@@ -2,7 +2,7 @@ package cn.xpleaf.netshop.serv.scala.analysis.module.olap.session
 
 import cn.xpleaf.netshop.serv.java.analysis.dao.{ITaskDao, TaskDaoImpl}
 import cn.xpleaf.netshop.serv.java.analysis.domain.Task
-import cn.xpleaf.netshop.serv.java.analysis.utils.ParamUtil
+import cn.xpleaf.netshop.serv.java.analysis.utils.{DateUtils, ParamUtil}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{DataFrame, Row}
 import org.apache.spark.sql.hive.HiveContext
@@ -100,7 +100,7 @@ object UserSessionAggStatsAnalysisApp {
           * 如果需要的话，也说得过去吧，只是目前没有这个必要，调优的直接参考之前的文档即可
           */
         val sessionId2ActionsRDD:RDD[(String, Iterable[Row])] = sessionId2ActionRDD.groupByKey()
-        println("-------------------------->sessionIdsActionsRDD's size: " + sessionId2ActionsRDD.count())
+        println("-------------------------->sessionId2ActionsRDD's size: " + sessionId2ActionsRDD.count())
         //--------------------------------------------------------------------------------------------//
 
         /**
@@ -118,9 +118,14 @@ object UserSessionAggStatsAnalysisApp {
           * 从上面的思路可以知道，最后出来的userId2PartAggInfoRDD，k相同即userId相同的RDD可能会有多个，
           * 但这也是正常的，一份userId的RDD，就代表一次用户session会话，多份userId相同的RDD，就代表多次用户session会话
           * 那为什么是partAggInfo呢？因为这时我们的RDD还没有用户信息，这个后面会再做处理
+          *
+          * 根据这样处理的思路也可以知道，sessionId2ActionsRDD和userId2PartAggInfoRDD的大小应该是相等的
+          * 为什么？
+          * 因为getUserId2PartAggInfoRDD方法中使用的操作是map，是一对一的输入输出关系，所以肯定是一样的，
+          * 现在只是将其sessionId2ActionsRDD以另外一种方式来进行表示：k为userId，v为聚合后的用户action
           */
-        val userId2PartAggInfoRDD:RDD[(String, String)]= getUserId2PartAggInfoRDD(hiveContext, sessionId2ActionRDD)
-
+        val userId2PartAggInfoRDD:RDD[(String, String)]= getUserId2PartAggInfoRDD(sessionId2ActionsRDD)
+        println("-------------------------->userId2PartAggInfoRDD's size: " + userId2PartAggInfoRDD.count())
 
         // 关闭SparkContext
         sc.stop()
@@ -130,8 +135,106 @@ object UserSessionAggStatsAnalysisApp {
     /**
       * 将sessionId2ActionsRDD转换为userId2PartAggInfoRDD
       */
-    def getUserId2PartAggInfoRDD(context: HiveContext, value: RDD[(String, Row)]):RDD[(String, String)] = {
-        null
+    def getUserId2PartAggInfoRDD(sessionId2ActionsRDD: RDD[(String, Iterable[Row])]):RDD[(String, String)] = {
+        // 开始执行操作，每次map操作就是对用户的一次访问session的处理
+        val userId2PartAggInfoRDD:RDD[(String, String)] = sessionId2ActionsRDD.map{ case (sessionId:String, rows:Iterable[Row]) =>
+
+            var userId:String = null                    // 用户id，一次session中的userId都是一样的
+                var startTime:String = null             // session开始时间
+                var endTime:String = null               // session结束时间
+                var searchKeywords:String = null        // session时间内聚合的搜索关键词集合
+                var clickCategoryIds:String = null      // session时间内聚合的点击品类id集合
+                var orderCategoryIds:String = null      // session时间内聚合的下单品类id集合
+                var payCategoryIds:String = null        // session时间内聚合的支付品类id集合
+
+            // 处理每一行，就是该session中用户的每一次action
+            // 显然一次action只可能执行一次操作
+            for(row <- rows) {
+                if(userId != null) {
+                    userId = row.getAs[Long]("user_id").toString
+                }
+                // 初始化startTime和endTime
+                val actionTime = row.getAs[String]("action_time")
+                if(startTime == null) {
+                    startTime = actionTime
+                }
+                if(endTime == null) {
+                    endTime = actionTime
+                }
+                // 判断并对startTime和endTime进行赋值
+                if(DateUtils.before(actionTime, startTime)) {
+                    startTime = actionTime
+                }
+                if(DateUtils.after(actionTime, endTime)) {
+                    endTime = actionTime
+                }
+                // 处理搜索关键字
+                val searchKeyword = row.getAs[String]("search_keyword")
+                if(searchKeyword != null && !"null".equals(searchKeyword)) {    // 必须加!"null".equals，详见开发文档
+                    if(searchKeywords != null) {
+                        if (!searchKeywords.split(",").contains(searchKeyword)) {
+                            searchKeywords = String.format("%s,%s", searchKeywords, searchKeyword)
+                        }
+                    } else {    // 初始化searchKeywords，下面的操作类似
+                        searchKeywords = searchKeyword
+                    }
+                }
+                // 处理点击品类id
+                val clickCategoryId = row.getAs[Long]("click_category_id")
+                if(clickCategoryId != null) {
+                    if(clickCategoryIds != null) {
+                        if (!clickCategoryIds.split(",").contains(clickCategoryId)) {
+                            clickCategoryIds = String.format("%s,%s", clickCategoryIds, clickCategoryId.toString)
+                        }
+                    } else {
+                        clickCategoryIds = clickCategoryId.toString
+                    }
+                }
+                // 处理订单品类id
+                val orderCategoryId = row.getAs[String]("order_category_ids")
+                if(orderCategoryId != null && !"null".equals(orderCategoryId)) {
+                    if(orderCategoryIds != null) {
+                        if (!orderCategoryIds.split(",").contains(orderCategoryId)) {
+                            orderCategoryIds = String.format("%s,%s", orderCategoryIds, orderCategoryId)
+                        }
+                    } else {
+                        orderCategoryIds = orderCategoryId
+                    }
+                }
+                // 处理支付品类id
+                val payCategoryId = row.getAs[String]("pay_category_ids")
+                if(payCategoryId != null && !"null".equals(payCategoryId)) {
+                    if(payCategoryIds != null) {
+                        if (!payCategoryIds.split(",").contains(payCategoryId)) {
+                            payCategoryIds = String.format("%s,%s", payCategoryIds, payCategoryId)
+                        }
+                    } else {
+                        payCategoryIds = payCategoryId
+                    }
+                }
+
+            }
+            // 计算访问session时长
+            val visitLength:Int = DateUtils.minus(endTime, startTime)
+            // 计算访问步长，就是执行了多少次操作
+            val stepLength:Long = rows.size
+            // 生成partAggInfo
+            // 用startTime作为sessionTime
+            val partAggInfo:String =
+                s"""
+                  |session_id=$sessionId|
+                  |search_keywords=$searchKeywords|
+                  |click_category_ids=$clickCategoryIds|
+                  |order_category_ids=$orderCategoryIds|
+                  |pay_category_ids=$payCategoryIds|
+                  |visit_length=$visitLength|
+                  |step_length=$stepLength|
+                  |start_time=$startTime|
+                """.stripMargin
+
+            (userId, partAggInfo)
+        }
+        userId2PartAggInfoRDD
     }
 
     /**
