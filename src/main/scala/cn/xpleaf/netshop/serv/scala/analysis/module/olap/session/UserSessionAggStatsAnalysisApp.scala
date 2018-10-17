@@ -126,6 +126,7 @@ object UserSessionAggStatsAnalysisApp {
           */
         val userId2PartAggInfoRDD:RDD[(String, String)]= getUserId2PartAggInfoRDD(sessionId2ActionsRDD)
         println("-------------------------->userId2PartAggInfoRDD's size: " + userId2PartAggInfoRDD.count())
+        userId2PartAggInfoRDD.take(10).foreach(tuple => println(s"userId: ${tuple._1}, partAggInfo: ${tuple._2}"))
 
         // 关闭SparkContext
         sc.stop()
@@ -140,17 +141,17 @@ object UserSessionAggStatsAnalysisApp {
         val userId2PartAggInfoRDD:RDD[(String, String)] = sessionId2ActionsRDD.map{ case (sessionId:String, rows:Iterable[Row]) =>
 
             var userId:String = null                    // 用户id，一次session中的userId都是一样的
-                var startTime:String = null             // session开始时间
-                var endTime:String = null               // session结束时间
-                var searchKeywords:String = null        // session时间内聚合的搜索关键词集合
-                var clickCategoryIds:String = null      // session时间内聚合的点击品类id集合
-                var orderCategoryIds:String = null      // session时间内聚合的下单品类id集合
-                var payCategoryIds:String = null        // session时间内聚合的支付品类id集合
+            var startTime:String = null             // session开始时间
+            var endTime:String = null               // session结束时间
+            var searchKeywords:String = null        // session时间内聚合的搜索关键词集合
+            var clickCategoryIds:String = null      // session时间内聚合的点击品类id集合
+            var orderCategoryIds:String = null      // session时间内聚合的下单品类id集合
+            var payCategoryIds:String = null        // session时间内聚合的支付品类id集合
 
             // 处理每一行，就是该session中用户的每一次action
             // 显然一次action只可能执行一次操作
             for(row <- rows) {
-                if(userId != null) {
+                if(userId == null) {
                     userId = row.getAs[Long]("user_id").toString
                 }
                 // 初始化startTime和endTime
@@ -218,8 +219,11 @@ object UserSessionAggStatsAnalysisApp {
             val visitLength:Int = DateUtils.minus(endTime, startTime)
             // 计算访问步长，就是执行了多少次操作
             val stepLength:Long = rows.size
-            // 生成partAggInfo
-            // 用startTime作为sessionTime
+            /**
+              * 生成partAggInfo
+              * 这里是用startTime作为sessionTime
+              * 注意这里使用这种方式，符号|的后面还会有换行符\n，所以在split时，需要应该为：val arr = str.split("\\|\n")
+              */
             val partAggInfo:String =
                 s"""
                   |session_id=$sessionId|
