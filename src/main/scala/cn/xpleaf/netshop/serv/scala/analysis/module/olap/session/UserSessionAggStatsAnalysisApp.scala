@@ -2,7 +2,7 @@ package cn.xpleaf.netshop.serv.scala.analysis.module.olap.session
 
 import cn.xpleaf.netshop.serv.java.analysis.dao.{ITaskDao, TaskDaoImpl}
 import cn.xpleaf.netshop.serv.java.analysis.domain.Task
-import cn.xpleaf.netshop.serv.java.analysis.utils.{DateUtils, ParamUtil}
+import cn.xpleaf.netshop.serv.java.analysis.utils.{DateUtils, ParamUtil, StringUtils}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{DataFrame, Row}
 import org.apache.spark.sql.hive.HiveContext
@@ -101,6 +101,9 @@ object UserSessionAggStatsAnalysisApp {
           */
         val sessionId2ActionsRDD:RDD[(String, Iterable[Row])] = sessionId2ActionRDD.groupByKey()
         println("-------------------------->sessionId2ActionsRDD's size: " + sessionId2ActionsRDD.count())
+        sessionId2ActionsRDD.take(10).foreach(t => {
+            println(s"sessionId: ${t._1}, rows: ${t._2}")
+        })
         //--------------------------------------------------------------------------------------------//
 
         /**
@@ -124,13 +127,67 @@ object UserSessionAggStatsAnalysisApp {
           * 因为getUserId2PartAggInfoRDD方法中使用的操作是map，是一对一的输入输出关系，所以肯定是一样的，
           * 现在只是将其sessionId2ActionsRDD以另外一种方式来进行表示：k为userId，v为聚合后的用户action
           */
-        val userId2PartAggInfoRDD:RDD[(String, String)]= getUserId2PartAggInfoRDD(sessionId2ActionsRDD)
+        val userId2PartAggInfoRDD:RDD[(String, String)] = getUserId2PartAggInfoRDD(sessionId2ActionsRDD)
         println("-------------------------->userId2PartAggInfoRDD's size: " + userId2PartAggInfoRDD.count())
-        userId2PartAggInfoRDD.take(10).foreach(tuple => println(s"userId: ${tuple._1}, partAggInfo: ${tuple._2}"))
+        userId2PartAggInfoRDD.take(10).foreach(tuple => println(s"userId: ${tuple._1}, partAggInfo: ${tuple._2}\n"))
+
+        /**
+          * 5.将用户信息user_info表中的信息和partAggInfo聚合在一起
+          * k,v
+          * k：sessionId
+          * v：partAggInfo与user_info表中数据聚合之后的string数据
+          * 其实上面生成userId2PartAggInfoRDD的目的就是为了能够与user_info表中的数据进行join，因为在user_info表中，user_id是唯一的
+          * 这样之后得到的RDD其实跟sessionId2ActionsRDD类似，只是此时v变成了包含用户信息的session聚合信息
+          */
+        val sessionId2FullAggInfoRDD:RDD[(String, String)] = getSessionId2FullAggInfoRDD(hiveContext, userId2PartAggInfoRDD)
+        println("-------------------------->sessionId2FullAggInfoRDD's size: " + sessionId2FullAggInfoRDD.count())
+        sessionId2FullAggInfoRDD.take(10).foreach(tuple => println(s"sessionId: ${tuple._1}, partAggInfo: ${tuple._2}\n"))
+
 
         // 关闭SparkContext
         sc.stop()
 
+    }
+
+    /**
+      * 将用户信息user_info表中的信息和partAggInfo聚合在一起
+      */
+    def getSessionId2FullAggInfoRDD(hiveContext: HiveContext, userId2PartAggInfoRDD: RDD[(String, String)]):RDD[(String, String)] = {
+        // 从hive中加载user_info表数据
+        val sql = "SELECT * FROM user_info"
+        hiveContext.sql("use netshop")
+        val userInfoDf:DataFrame = hiveContext.sql(sql)
+        // 将userInfoDf转换为userId2UserInfoRDD
+        val userId2UserInfoRDD:RDD[(String, Row)] = userInfoDf.rdd.map(row => {
+            val userId:String = row.getAs[Long]("id").toString
+            (userId, row)
+        })
+        // 将userId2PartAggInfoRDD与userId2UserInfoRDD进行join操作，连接在一起
+        val userId2FullAggInfoRDD:RDD[(String, (String, Row))] = userId2PartAggInfoRDD.join(userId2UserInfoRDD)
+        // 将userId2FullAggInfoRDD转换为sessionId2FullAggInfoRDD
+        val sessionId2FullAggInfoRDD:RDD[(String, String)] = userId2FullAggInfoRDD.map{ case (userId:String, (partAggInfo:String, row:Row)) =>
+            // 获得row中user的关键信息
+            val age:Int = row.getAs[Int]("age")
+            val professional:String = row.getAs[String]("professional")
+            val city:String = row.getAs[String]("city")
+            val sex:String = row.getAs[String]("sex")
+            /**
+              * 将user信息与partAggInfo信息连接在一起
+              * 注意下面的|$partAggInfo不要在"""的下一行，否则其前面会有\n
+              * 这样通过StringUtils.getFieldFromConcatString去获取值时就无法取到第一个值
+              * （下面现在这种方式是：首尾的换行符都去掉）
+              */
+            val fullAggInfo =
+                s"""|$partAggInfo|
+                    |age=$age|
+                    |professional=$professional|
+                    |city=$city|
+                    |sex=$sex|""".stripMargin
+            // 获得sessionId，注意按照之前的处理（上面也类似），分隔符是|\n
+            val sessionId = StringUtils.getFieldFromConcatString(partAggInfo, "\\|\n", "session_id")
+            (sessionId, fullAggInfo)
+        }
+        sessionId2FullAggInfoRDD
     }
 
     /**
@@ -225,16 +282,14 @@ object UserSessionAggStatsAnalysisApp {
               * 注意这里使用这种方式，符号|的后面还会有换行符\n，所以在split时，需要应该为：val arr = str.split("\\|\n")
               */
             val partAggInfo:String =
-                s"""
-                  |session_id=$sessionId|
-                  |search_keywords=$searchKeywords|
-                  |click_category_ids=$clickCategoryIds|
-                  |order_category_ids=$orderCategoryIds|
-                  |pay_category_ids=$payCategoryIds|
-                  |visit_length=$visitLength|
-                  |step_length=$stepLength|
-                  |start_time=$startTime|
-                """.stripMargin
+                s"""|session_id=$sessionId|
+                    |search_keywords=$searchKeywords|
+                    |click_category_ids=$clickCategoryIds|
+                    |order_category_ids=$orderCategoryIds|
+                    |pay_category_ids=$payCategoryIds|
+                    |visit_length=$visitLength|
+                    |step_length=$stepLength|
+                    |start_time=$startTime|""".stripMargin
 
             (userId, partAggInfo)
         }
