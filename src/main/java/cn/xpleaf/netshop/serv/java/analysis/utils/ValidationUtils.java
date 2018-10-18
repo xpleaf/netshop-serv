@@ -30,7 +30,7 @@ public class ValidationUtils {
 		int endParamFieldValue = Integer.valueOf(endParamFieldStr);
 		
 		String dataFieldStr = StringUtils.getFieldFromConcatString(
-				data, "\\|", dataField);
+				data, "\\|\n", dataField);
 		if(dataFieldStr != null) {
 			int dataFieldValue = Integer.valueOf(dataFieldStr);
 			if(dataFieldValue >= startParamFieldValue &&
@@ -62,7 +62,7 @@ public class ValidationUtils {
 		String[] paramFieldValueSplited = paramFieldValue.split(",");  
 		
 		String dataFieldValue = StringUtils.getFieldFromConcatString(
-				data, "\\|", dataField);
+				data, "\\|\n", dataField);
 		if(dataFieldValue != null) {
 			String[] dataFieldValueSplited = dataFieldValue.split(",");
 			
@@ -95,7 +95,7 @@ public class ValidationUtils {
 		}
 		
 		String dataFieldValue = StringUtils.getFieldFromConcatString(
-				data, "\\|", dataField);
+				data, "\\|\n", dataField);
 		if(dataFieldValue != null) {
 			if(dataFieldValue.equals(paramFieldValue)) {
 				return true;
