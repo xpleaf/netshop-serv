@@ -2,7 +2,7 @@ package cn.xpleaf.netshop.serv.scala.analysis.module.olap.session
 
 import cn.xpleaf.netshop.serv.java.analysis.dao.{ITaskDao, TaskDaoImpl}
 import cn.xpleaf.netshop.serv.java.analysis.domain.Task
-import cn.xpleaf.netshop.serv.java.analysis.utils.{DateUtils, ParamUtil, StringUtils}
+import cn.xpleaf.netshop.serv.java.analysis.utils.{DateUtils, ParamUtil, StringUtils, ValidationUtils}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{DataFrame, Row}
 import org.apache.spark.sql.hive.HiveContext
@@ -130,6 +130,7 @@ object UserSessionAggStatsAnalysisApp {
         val userId2PartAggInfoRDD:RDD[(String, String)] = getUserId2PartAggInfoRDD(sessionId2ActionsRDD)
         println("-------------------------->userId2PartAggInfoRDD's size: " + userId2PartAggInfoRDD.count())
         userId2PartAggInfoRDD.take(10).foreach(tuple => println(s"userId: ${tuple._1}, partAggInfo: ${tuple._2}\n"))
+        //--------------------------------------------------------------------------------------------//
 
         /**
           * 5.将用户信息user_info表中的信息和partAggInfo聚合在一起
@@ -141,12 +142,88 @@ object UserSessionAggStatsAnalysisApp {
           */
         val sessionId2FullAggInfoRDD:RDD[(String, String)] = getSessionId2FullAggInfoRDD(hiveContext, userId2PartAggInfoRDD)
         println("-------------------------->sessionId2FullAggInfoRDD's size: " + sessionId2FullAggInfoRDD.count())
-        sessionId2FullAggInfoRDD.take(10).foreach(tuple => println(s"sessionId: ${tuple._1}, partAggInfo: ${tuple._2}\n"))
+        sessionId2FullAggInfoRDD.take(10).foreach(tuple => println(s"sessionId: ${tuple._1}, fullAggInfo: ${tuple._2}\n"))
+        //--------------------------------------------------------------------------------------------//
+
+        /**
+          * 6.根据用户在params提供的针对用户特征筛选数据参数，对以上聚合结果sessionId2FullAggInfoRDD进行过滤
+          * k,v
+          * k：v中符合条件的sessionId
+          * v：fullAggInfo
+          * 使用的是filter算子，因此有一个优化点，即filter之后重新打算数据，以使数据更加均匀，这一步后面可以再做
+          * 参考：《Spark笔记整理（九）：性能优化概述与开发调优》http://blog.51cto.com/xpleaf/2113139
+          * 其实就是使用filter之后进行coalesce操作
+          *
+          * filter的时候需要注意，在获取年龄范围时，ValidationUtils获取json字符串中的年龄之后，是使用
+          * Integer.valueOf(dataFieldStr)
+          * 来对数字字符串进行格式化的，但由于其使用的ParamUtil中使用gson来解析json字符串，而在gson中，
+          * 对于数字，统一处理为double类型的数字object，这样的话，上面的转换就会有问题，那么在不修改两个
+          * 工具类的前提下，如何使功能正常？那就是传入的json参数中，startAge和endAge都为数字字符串，而不是数字，即：
+          * {"startAge":"20","endAge":"50","startDate":"2018-10-14","endDate":"2018-10-15"}
+          */
+        val filteredSessionId2FullAggInfoRDD:RDD[(String, String)] = getFilteredSessionId2FullAggInfoRDD(paramJson, sessionId2FullAggInfoRDD)
+        println("-------------------------->filteredSessionId2FullAggInfoRDD's size: " + filteredSessionId2FullAggInfoRDD.count())
+        filteredSessionId2FullAggInfoRDD.take(10).foreach(tuple => println(s"sessionId: ${tuple._1}, fullAggInfo: ${tuple._2}\n"))
+        //--------------------------------------------------------------------------------------------//
 
 
         // 关闭SparkContext
         sc.stop()
 
+    }
+
+    /*================================================上面是main方法，下面是内部使用方法================================================*/
+
+    /**
+      * 根据用户在params提供的针对用户特征筛选数据参数，对sessionId2FullAggInfoRDD进行过滤
+      */
+    def getFilteredSessionId2FullAggInfoRDD(paramJson: String, sessionId2FullAggInfoRDD: RDD[(String, String)]):RDD[(String, String)] = {
+        val startAge = ParamUtil.getValueByKey(paramJson, "startAge")
+        val endAge = ParamUtil.getValueByKey(paramJson, "endAge")
+        val sex = ParamUtil.getValueByKey(paramJson, "sex")
+        val cities = ParamUtil.getValueByKey(paramJson, "cities")
+        val professionals = ParamUtil.getValueByKey(paramJson, "professionals")
+
+        // 进行参数的汇总
+        var parameters = ""
+        if(startAge != null) {
+            parameters = s"${parameters}startAge=$startAge|"
+        }
+        if(endAge != null) {
+            parameters = s"${parameters}endAge=$endAge|"
+        }
+        if(sex != null) {
+            parameters = s"${parameters}sex=$sex|"
+        }
+        if(cities != null) {
+            parameters = s"${parameters}cities=$cities|"
+        }
+        if(professionals != null) {
+            parameters = s"${parameters}professionals=$professionals|"
+        }
+        // 使用filter算子执行过滤，flag为false的会被过滤掉
+        sessionId2FullAggInfoRDD.filter{case (sessionId, fullAggInfo) =>
+            var flag = true     // 下面只要有一个条件不满足，flag就为false，数据就会被过滤掉
+            // 判断当前年龄是否在[startAge, endAge]之间
+            if(flag && !ValidationUtils
+                .between(fullAggInfo, "age", parameters, "startAge", "endAge")) {
+                flag = false
+            }
+            // 判断当前sex是否为指定的sex
+            if(flag && !ValidationUtils.equal(fullAggInfo, "sex", parameters, "sex")) {
+                flag = false
+            }
+            // 判断当前地域是否在指定的cities
+            if(flag && !ValidationUtils.in(fullAggInfo, "city", parameters, "cities")) {
+                flag = false
+            }
+            // 判断当前职业是否在professionals中
+            if(flag && !ValidationUtils.in(fullAggInfo, "professional", parameters, "professionals")) {
+                flag = false
+            }
+
+            flag
+        }
     }
 
     /**
