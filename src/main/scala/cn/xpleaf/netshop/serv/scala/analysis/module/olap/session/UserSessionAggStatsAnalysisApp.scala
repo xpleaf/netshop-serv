@@ -250,18 +250,15 @@ object UserSessionAggStatsAnalysisApp {
             val sex:String = row.getAs[String]("sex")
             /**
               * 将user信息与partAggInfo信息连接在一起
-              * 注意下面的|$partAggInfo不要在"""的下一行，否则其前面会有\n
-              * 这样通过StringUtils.getFieldFromConcatString去获取值时就无法取到第一个值
-              * （下面现在这种方式是：首尾的换行符都去掉）
               */
             val fullAggInfo =
-                s"""|$partAggInfo|
-                    |age=$age|
-                    |professional=$professional|
-                    |city=$city|
-                    |sex=$sex|""".stripMargin
-            // 获得sessionId，注意按照之前的处理（上面也类似），分隔符是|\n
-            val sessionId = StringUtils.getFieldFromConcatString(partAggInfo, "\\|\n", "session_id")
+                s"$partAggInfo|" +
+                s"age=$age|" +
+                s"professional=$professional|" +
+                s"city=$city|" +
+                s"sex=$sex|"
+            // 获得sessionId\
+            val sessionId = StringUtils.getFieldFromConcatString(partAggInfo, "\\|", "session_id")
             (sessionId, fullAggInfo)
         }
         sessionId2FullAggInfoRDD
@@ -356,17 +353,16 @@ object UserSessionAggStatsAnalysisApp {
             /**
               * 生成partAggInfo
               * 这里是用startTime作为sessionTime
-              * 注意这里使用这种方式，符号|的后面还会有换行符\n，所以在split时，需要应该为：val arr = str.split("\\|\n")
               */
             val partAggInfo:String =
-                s"""|session_id=$sessionId|
-                    |search_keywords=$searchKeywords|
-                    |click_category_ids=$clickCategoryIds|
-                    |order_category_ids=$orderCategoryIds|
-                    |pay_category_ids=$payCategoryIds|
-                    |visit_length=$visitLength|
-                    |step_length=$stepLength|
-                    |start_time=$startTime|""".stripMargin
+                s"session_id=$sessionId|" +
+                s"search_keywords=$searchKeywords|" +
+                s"click_category_ids=$clickCategoryIds|" +
+                s"order_category_ids=$orderCategoryIds|" +
+                s"pay_category_ids=$payCategoryIds|" +
+                s"visit_length=$visitLength|" +
+                s"step_length=$stepLength|" +
+                s"start_time=$startTime|"
 
             (userId, partAggInfo)
         }
