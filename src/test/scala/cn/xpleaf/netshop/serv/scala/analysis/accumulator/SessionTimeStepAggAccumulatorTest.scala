@@ -1,5 +1,6 @@
 package cn.xpleaf.netshop.serv.scala.analysis.accumulator
 
+import org.apache.log4j.{Level, Logger}
 import org.apache.spark.{SparkConf, SparkContext}
 
 /**
@@ -13,8 +14,10 @@ object SessionTimeStepAggAccumulatorTest {
 
     // 测试自定义累加器
     def test01(): Unit = {
+        //Logger.getLogger("org.apache.spark").setLevel(Level.OFF)
+        //Logger.getLogger("org.spark-project").setLevel(Level.OFF)
         val conf = new SparkConf()
-            .setMaster("local[2]")
+            .setMaster("local[1]")
             .setAppName(s"${SessionTimeStepAggAccumulatorTest.getClass.getSimpleName}")
         val sc = new SparkContext(conf)
         val initialValue =
@@ -36,8 +39,12 @@ object SessionTimeStepAggAccumulatorTest {
             s"session_count=0|"
         val sessionTimeStepAggAccumulator = sc.accumulator[String](initialValue)(new SessionTimeStepAggAccumulator())
 
-        sessionTimeStepAggAccumulator.add("td_1s_3s")
-        sessionTimeStepAggAccumulator.add("td_1s_3s")
+        val list = List("Hello you")
+        val listRDD = sc.parallelize(list)
+        listRDD.foreach(line => {
+            sessionTimeStepAggAccumulator.add("td_1s_3s")
+            sessionTimeStepAggAccumulator.add("td_1s_3s")
+        })
         sessionTimeStepAggAccumulator.add("session_count")
         println(sessionTimeStepAggAccumulator.value)
     }

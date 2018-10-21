@@ -55,14 +55,42 @@ class SessionTimeStepAggAccumulator extends AccumulatorParam[String] {
       * @return             修改后的字符串值
       */
     override def addInPlace(allFields: String, accField: String): String = {
-        if(allFields.contains(accField)) {  // 如果存在该字段名，则在字段名对应的值中加1
+        if(allFields.contains(accField)) {
+            /**
+              * 如果存在该字段名，则在字段名对应的值中加1
+              * 此时的操作是在每个task中进行的累加器操作
+              */
             val oldValue:String = StringUtils.getFieldFromConcatString(allFields, "\\|", accField)
             val newValue:Int = oldValue.toInt + 1
             // 直接返回修改后的字符串
             StringUtils.setFieldInConcatString(allFields, "\\|", accField, newValue.toString)
-        } else {                            // 否则不进行操作
-            println("累加器中不存在该字段名，添加值失败！")
-            allFields
+        } else {
+            /**
+              * 如果不包含，说明这时是不同task之间的累加器进行合并，第一次合并时，allFields为initialValue
+              * 之后就为合并之后的值，如果有两个task，那么就会合并两次，这点尤其需要注意，
+              * 那么accField是什么呢？就为前面的task计算的结果，就是那个task中的allFields
+              * 也就是说，spark累加器的机制是这样子的：
+              * 1.每个task中计算，各自的累加器值先是独立进行计算的
+              * 2.task中计算完成之后，再将各个task计算后的累加器进行合并
+              * 3.在合并时，spark会构建一个全新的累加器去进行合并（这也符合上面的解析）
+              * 更正：这种合并应该是不同线程之间的合并，并不是不同task，因为即便只有一个task，也会有这种情况
+              * 目前的理解是这样，可能会有偏差，但至少也解决了问题
+              */
+            // 将accField中的每个值合并到allFields中
+            println("执行合并操作------->accField: " + accField)
+            println("执行合并操作------->allFields: " + allFields)
+            StringUtils.combineAccumulatorsValue(allFields, accField)
         }
     }
 }
+/*
+处理跟实际想的也许有些偏差：
+执行合并操作------->accField: td_1s_3s=7|td_4s_6s=6|td_7s_9s=7|td_10s_30s=50|td_30s_60s=48|td_1m_3m=102|td_3m_10m=412|td_10m_30m=1181|td_30m=3183|sl_1_3=5198|sl_4_6=5385|sl_7_9=2233|sl_10_30=481|sl_30_60=0|sl_60=0|session_count=13297
+执行合并操作------->allFields: td_1s_3s=0|td_4s_6s=0|td_7s_9s=0|td_10s_30s=0|td_30s_60s=0|td_1m_3m=0|td_3m_10m=0|td_10m_30m=0|td_30m=0|sl_1_3=0|sl_4_6=0|sl_7_9=0|sl_10_30=0|sl_30_60=0|sl_60=0|session_count=0|
+
+执行合并操作------->accField: td_1s_3s=7|td_4s_6s=4|td_7s_9s=6|td_10s_30s=37|td_30s_60s=41|td_1m_3m=105|td_3m_10m=400|td_10m_30m=1226|td_30m=3231|sl_1_3=5094|sl_4_6=5486|sl_7_9=2368|sl_10_30=431|sl_30_60=0|sl_60=0|session_count=13379
+执行合并操作------->allFields: td_1s_3s=14|td_4s_6s=12|td_7s_9s=14|td_10s_30s=100|td_30s_60s=96|td_1m_3m=204|td_3m_10m=824|td_10m_30m=2362|td_30m=6366|sl_1_3=10396|sl_4_6=10770|sl_7_9=4466|sl_10_30=962|sl_30_60=0|sl_60=0|session_count=26594
+
+-------------------------->sessionTimeStepAggAccumulator's value: td_1s_3s=14|td_4s_6s=8|td_7s_9s=12|td_10s_30s=74|td_30s_60s=82|td_1m_3m=210|td_3m_10m=800|td_10m_30m=2452|td_30m=6462|sl_1_3=10188|sl_4_6=10972|sl_7_9=4736|sl_10_30=862|sl_30_60=0|sl_60=0|session_count=26758
+但不可否认的是，值确实是会合并的。
+ */

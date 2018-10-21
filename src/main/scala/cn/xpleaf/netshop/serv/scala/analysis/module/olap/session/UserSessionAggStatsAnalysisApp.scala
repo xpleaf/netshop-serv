@@ -3,10 +3,11 @@ package cn.xpleaf.netshop.serv.scala.analysis.module.olap.session
 import cn.xpleaf.netshop.serv.java.analysis.dao.{ITaskDao, TaskDaoImpl}
 import cn.xpleaf.netshop.serv.java.analysis.domain.Task
 import cn.xpleaf.netshop.serv.java.analysis.utils.{DateUtils, ParamUtil, StringUtils, ValidationUtils}
+import cn.xpleaf.netshop.serv.scala.analysis.accumulator.SessionTimeStepAggAccumulator
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{DataFrame, Row}
 import org.apache.spark.sql.hive.HiveContext
-import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.{Accumulator, SparkConf, SparkContext}
 import org.slf4j.{Logger, LoggerFactory}
 
 /**
@@ -61,7 +62,7 @@ object UserSessionAggStatsAnalysisApp {
 
         // 初始化SparkConf、SparkContext和HiveContext
         val conf = new SparkConf()
-            .setMaster("local[2]")      // 本地测试时打开
+            .setMaster("local[4]")      // 本地测试时打开
             .setAppName(s"${UserSessionAggStatsAnalysisApp.getClass.getSimpleName}_taskID_$taskID")
         val sc = new SparkContext(conf)
         val hiveContext = new HiveContext(sc)
@@ -85,6 +86,7 @@ object UserSessionAggStatsAnalysisApp {
         val sessionId2ActionRDD:RDD[(String, Row)] = sessionRowRDD.map{
             case row => (row.getAs("session_id"), row)
         }
+        sessionId2ActionRDD.cache()
         println("-------------------------->sessionId2ActionRDD's size: " + sessionId2ActionRDD.count())
         //--------------------------------------------------------------------------------------------//
 
@@ -100,6 +102,7 @@ object UserSessionAggStatsAnalysisApp {
           * 如果需要的话，也说得过去吧，只是目前没有这个必要，调优的直接参考之前的文档即可
           */
         val sessionId2ActionsRDD:RDD[(String, Iterable[Row])] = sessionId2ActionRDD.groupByKey()
+        sessionId2ActionsRDD.cache()
         println("-------------------------->sessionId2ActionsRDD's size: " + sessionId2ActionsRDD.count())
         sessionId2ActionsRDD.take(10).foreach(t => {
             println(s"sessionId: ${t._1}, rows: ${t._2}")
@@ -128,6 +131,7 @@ object UserSessionAggStatsAnalysisApp {
           * 现在只是将其sessionId2ActionsRDD以另外一种方式来进行表示：k为userId，v为聚合后的用户action
           */
         val userId2PartAggInfoRDD:RDD[(String, String)] = getUserId2PartAggInfoRDD(sessionId2ActionsRDD)
+        userId2PartAggInfoRDD.cache()
         println("-------------------------->userId2PartAggInfoRDD's size: " + userId2PartAggInfoRDD.count())
         userId2PartAggInfoRDD.take(10).foreach(tuple => println(s"userId: ${tuple._1}, partAggInfo: ${tuple._2}\n"))
         //--------------------------------------------------------------------------------------------//
@@ -141,6 +145,7 @@ object UserSessionAggStatsAnalysisApp {
           * 这样之后得到的RDD其实跟sessionId2ActionsRDD类似，只是此时v变成了包含用户信息的session聚合信息
           */
         val sessionId2FullAggInfoRDD:RDD[(String, String)] = getSessionId2FullAggInfoRDD(hiveContext, userId2PartAggInfoRDD)
+        sessionId2FullAggInfoRDD.cache()
         println("-------------------------->sessionId2FullAggInfoRDD's size: " + sessionId2FullAggInfoRDD.count())
         sessionId2FullAggInfoRDD.take(10).foreach(tuple => println(s"sessionId: ${tuple._1}, fullAggInfo: ${tuple._2}\n"))
         //--------------------------------------------------------------------------------------------//
@@ -162,10 +167,39 @@ object UserSessionAggStatsAnalysisApp {
           * {"startAge":"20","endAge":"50","startDate":"2018-10-14","endDate":"2018-10-15"}
           */
         val filteredSessionId2FullAggInfoRDD:RDD[(String, String)] = getFilteredSessionId2FullAggInfoRDD(paramJson, sessionId2FullAggInfoRDD)
+        filteredSessionId2FullAggInfoRDD.cache()
         println("-------------------------->filteredSessionId2FullAggInfoRDD's size: " + filteredSessionId2FullAggInfoRDD.count())
         filteredSessionId2FullAggInfoRDD.take(10).foreach(tuple => println(s"sessionId: ${tuple._1}, fullAggInfo: ${tuple._2}\n"))
         //--------------------------------------------------------------------------------------------//
 
+        /**
+          * 7.对过滤后的RDD，即filteredSessionId2FullAggInfoRDD
+          * 统计出访问时长在1s~3s、4s~6s、7s~9s、10s~30s、30s~60s、1m~3m、3m~10m、
+          * 10m~30m、30m以上各个范围内的session占比；访问步长在1~3、4~6、7~9、10~30、30~60、60以上各个
+          * 范围内的session占比
+          */
+        // 先初始化一个累加器，因为统计后的数据都保存在累加器中
+        val initialValue =
+            s"td_1s_3s=0|" +
+            s"td_4s_6s=0|" +
+            s"td_7s_9s=0|" +
+            s"td_10s_30s=0|" +
+            s"td_30s_60s=0|" +
+            s"td_1m_3m=0|" +
+            s"td_3m_10m=0|" +
+            s"td_10m_30m=0|" +
+            s"td_30m=0|" +
+            s"sl_1_3=0|" +
+            s"sl_4_6=0|" +
+            s"sl_7_9=0|" +
+            s"sl_10_30=0|" +
+            s"sl_30_60=0|" +
+            s"sl_60=0|" +
+            s"session_count=0|"
+        val sessionTimeStepAggAccumulator = sc.accumulator[String](initialValue)(new SessionTimeStepAggAccumulator)
+        // 调用方法进行统计
+        calculateTimeStepOperation(filteredSessionId2FullAggInfoRDD, sessionTimeStepAggAccumulator)
+        println("-------------------------->sessionTimeStepAggAccumulator's value: " + sessionTimeStepAggAccumulator.value)
 
         // 关闭SparkContext
         sc.stop()
@@ -173,6 +207,56 @@ object UserSessionAggStatsAnalysisApp {
     }
 
     /*================================================上面是main方法，下面是内部使用方法================================================*/
+
+    /**
+      * 统计出访问时长在1s~3s、4s~6s、7s~9s、10s~30s、30s~60s、1m~3m、3m~10m、
+      * 10m~30m、30m以上各个范围内的session占比；访问步长在1~3、4~6、7~9、10~30、30~60、60以上各个
+      * 范围内的session占比
+      */
+    def calculateTimeStepOperation(filteredSessionId2FullAggInfoRDD: RDD[(String, String)], sessionTimeStepAggAccumulator: Accumulator[String]):Unit = {
+        filteredSessionId2FullAggInfoRDD.foreach{ case (sessionId, fullAggInfo) =>
+            // 1.先计算session的数量
+            sessionTimeStepAggAccumulator.add("session_count")
+            // 拿到访问时长和访问步长
+            val visitLength: Int = StringUtils.getFieldFromConcatString(fullAggInfo, "\\|", "visit_length").toInt
+            val stepLength: Int = StringUtils.getFieldFromConcatString(fullAggInfo, "\\|", "step_length").toInt
+            // 2.找出访问时长的范围并赋值
+            if (visitLength >= 1 && visitLength <= 3) {
+                sessionTimeStepAggAccumulator.add("td_1s_3s")
+            } else if (visitLength >= 4 && visitLength <= 6) {
+                sessionTimeStepAggAccumulator.add("td_4s_6s")
+            } else if (visitLength >= 7 && visitLength <= 9) {
+                sessionTimeStepAggAccumulator.add("td_7s_9s")
+            } else if (visitLength >= 10 && visitLength <= 30) {
+                sessionTimeStepAggAccumulator.add("td_10s_30s")
+            } else if (visitLength > 30 && visitLength <= 60) {
+                sessionTimeStepAggAccumulator.add("td_30s_60s")
+            } else if (visitLength > 60 && visitLength <= 180) {
+                sessionTimeStepAggAccumulator.add("td_1m_3m")
+            } else if (visitLength > 180 && visitLength <= 600) {
+                sessionTimeStepAggAccumulator.add("td_3m_10m")
+            } else if (visitLength > 600 && visitLength <= 1800) {
+                sessionTimeStepAggAccumulator.add("td_10m_30m")
+            } else if (visitLength > 1800) {
+                sessionTimeStepAggAccumulator.add("td_30m")
+            }
+            // 3.找出访问步长的范围并赋值
+            if(stepLength >= 1 && stepLength <= 3) {
+                sessionTimeStepAggAccumulator.add("sl_1_3")
+            } else if (stepLength >= 4 && stepLength <= 6) {
+                sessionTimeStepAggAccumulator.add("sl_4_6")
+            } else if (stepLength >= 7 && stepLength <= 9) {
+                sessionTimeStepAggAccumulator.add("sl_7_9")
+            } else if (stepLength >= 10 && stepLength <= 30) {
+                sessionTimeStepAggAccumulator.add("sl_10_30")
+            } else if (stepLength > 30 && stepLength <= 60) {
+                sessionTimeStepAggAccumulator.add("sl_30_60")
+            } else if (stepLength > 60) {
+                sessionTimeStepAggAccumulator.add("sl_60")
+            }
+
+        }
+    }
 
     /**
       * 根据用户在params提供的针对用户特征筛选数据参数，对sessionId2FullAggInfoRDD进行过滤

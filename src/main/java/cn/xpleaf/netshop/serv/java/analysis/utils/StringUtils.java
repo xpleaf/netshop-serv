@@ -112,6 +112,86 @@ public class StringUtils {
 		return buffer.toString();
 	}
 
+    /**
+     * 将不同task中的SessionTimeStepAggAccumulator计算之后的allFields
+     * （在新的累加器中，其成为accField）
+     * 合并到新的累加器的allFields中
+     * @param allFields
+     * @param accField
+     * @return
+     */
+	public static String combineAccumulatorsValue(String allFields, String accField) {
+	    // 先从accField中获取各个值
+	    String td_1s_3s_accField = StringUtils.getFieldFromConcatString(accField, "\\|", "td_1s_3s");
+        String td_4s_6s_accField = StringUtils.getFieldFromConcatString(accField, "\\|", "td_4s_6s");
+        String td_7s_9s_accField = StringUtils.getFieldFromConcatString(accField, "\\|", "td_7s_9s");
+        String td_10s_30s_accField = StringUtils.getFieldFromConcatString(accField, "\\|", "td_10s_30s");
+        String td_30s_60s_accField = StringUtils.getFieldFromConcatString(accField, "\\|", "td_30s_60s");
+        String td_1m_3m_accField = StringUtils.getFieldFromConcatString(accField, "\\|", "td_1m_3m");
+        String td_3m_10m_accField = StringUtils.getFieldFromConcatString(accField, "\\|", "td_3m_10m");
+        String td_10m_30m_accField = StringUtils.getFieldFromConcatString(accField, "\\|", "td_10m_30m");
+        String td_30m_accField = StringUtils.getFieldFromConcatString(accField, "\\|", "td_30m");
+        String sl_1_3_accField = StringUtils.getFieldFromConcatString(accField, "\\|", "sl_1_3");
+        String sl_4_6_accField = StringUtils.getFieldFromConcatString(accField, "\\|", "sl_4_6");
+        String sl_7_9_accField = StringUtils.getFieldFromConcatString(accField, "\\|", "sl_7_9");
+        String sl_10_30_accField = StringUtils.getFieldFromConcatString(accField, "\\|", "sl_10_30");
+        String sl_30_60_accField = StringUtils.getFieldFromConcatString(accField, "\\|", "sl_30_60");
+        String sl_60_accField = StringUtils.getFieldFromConcatString(accField, "\\|", "sl_60");
+        String session_count_accField = StringUtils.getFieldFromConcatString(accField, "\\|", "session_count");
+        // 再从allFields中拿到各个值
+        String td_1s_3s_allFields = StringUtils.getFieldFromConcatString(accField, "\\|", "td_1s_3s");
+        String td_4s_6s_allFields = StringUtils.getFieldFromConcatString(accField, "\\|", "td_4s_6s");
+        String td_7s_9s_allFields = StringUtils.getFieldFromConcatString(accField, "\\|", "td_7s_9s");
+        String td_10s_30s_allFields = StringUtils.getFieldFromConcatString(accField, "\\|", "td_10s_30s");
+        String td_30s_60s_allFields = StringUtils.getFieldFromConcatString(accField, "\\|", "td_30s_60s");
+        String td_1m_3m_allFields = StringUtils.getFieldFromConcatString(accField, "\\|", "td_1m_3m");
+        String td_3m_10m_allFields = StringUtils.getFieldFromConcatString(accField, "\\|", "td_3m_10m");
+        String td_10m_30m_allFields = StringUtils.getFieldFromConcatString(accField, "\\|", "td_10m_30m");
+        String td_30m_allFields = StringUtils.getFieldFromConcatString(accField, "\\|", "td_30m");
+        String sl_1_3_allFields = StringUtils.getFieldFromConcatString(accField, "\\|", "sl_1_3");
+        String sl_4_6_allFields = StringUtils.getFieldFromConcatString(accField, "\\|", "sl_4_6");
+        String sl_7_9_allFields = StringUtils.getFieldFromConcatString(accField, "\\|", "sl_7_9");
+        String sl_10_30_allFields = StringUtils.getFieldFromConcatString(accField, "\\|", "sl_10_30");
+        String sl_30_60_allFields = StringUtils.getFieldFromConcatString(accField, "\\|", "sl_30_60");
+        String sl_60_allFields = StringUtils.getFieldFromConcatString(accField, "\\|", "sl_60");
+        String session_count_allFields = StringUtils.getFieldFromConcatString(accField, "\\|", "session_count");
+        // 再设置值到allFields中，字符串是不可变的，所以一定要重新赋值
+        allFields = StringUtils.setFieldInConcatString(allFields, "\\|", "td_1s_3s",
+                String.valueOf(Long.valueOf(td_1s_3s_accField) + Long.valueOf(td_1s_3s_allFields)));
+        allFields = StringUtils.setFieldInConcatString(allFields, "\\|", "td_4s_6s",
+                String.valueOf(Long.valueOf(td_4s_6s_accField) + Long.valueOf(td_4s_6s_allFields)));
+        allFields = StringUtils.setFieldInConcatString(allFields, "\\|", "td_7s_9s",
+                String.valueOf(Long.valueOf(td_7s_9s_accField) + Long.valueOf(td_7s_9s_allFields)));
+        allFields = StringUtils.setFieldInConcatString(allFields, "\\|", "td_10s_30s",
+                String.valueOf(Long.valueOf(td_10s_30s_accField) + Long.valueOf(td_10s_30s_allFields)));
+        allFields = StringUtils.setFieldInConcatString(allFields, "\\|", "td_30s_60s",
+                String.valueOf(Long.valueOf(td_30s_60s_accField) + Long.valueOf(td_30s_60s_allFields)));
+        allFields = StringUtils.setFieldInConcatString(allFields, "\\|", "td_1m_3m",
+                String.valueOf(Long.valueOf(td_1m_3m_accField) + Long.valueOf(td_1m_3m_allFields)));
+        allFields = StringUtils.setFieldInConcatString(allFields, "\\|", "td_3m_10m",
+                String.valueOf(Long.valueOf(td_3m_10m_accField) + Long.valueOf(td_3m_10m_allFields)));
+        allFields = StringUtils.setFieldInConcatString(allFields, "\\|", "td_10m_30m",
+                String.valueOf(Long.valueOf(td_10m_30m_accField) + Long.valueOf(td_10m_30m_allFields)));
+        allFields = StringUtils.setFieldInConcatString(allFields, "\\|", "td_30m",
+                String.valueOf(Long.valueOf(td_30m_accField) + Long.valueOf(td_30m_allFields)));
+        allFields = StringUtils.setFieldInConcatString(allFields, "\\|", "sl_1_3",
+                String.valueOf(Long.valueOf(sl_1_3_accField) + Long.valueOf(sl_1_3_allFields)));
+        allFields = StringUtils.setFieldInConcatString(allFields, "\\|", "sl_4_6",
+                String.valueOf(Long.valueOf(sl_4_6_accField) + Long.valueOf(sl_4_6_allFields)));
+        allFields = StringUtils.setFieldInConcatString(allFields, "\\|", "sl_7_9",
+                String.valueOf(Long.valueOf(sl_7_9_accField) + Long.valueOf(sl_7_9_allFields)));
+        allFields = StringUtils.setFieldInConcatString(allFields, "\\|", "sl_10_30",
+                String.valueOf(Long.valueOf(sl_10_30_accField) + Long.valueOf(sl_10_30_allFields)));
+        allFields = StringUtils.setFieldInConcatString(allFields, "\\|", "sl_30_60",
+                String.valueOf(Long.valueOf(sl_30_60_accField) + Long.valueOf(sl_30_60_allFields)));
+        allFields = StringUtils.setFieldInConcatString(allFields, "\\|", "sl_60",
+                String.valueOf(Long.valueOf(sl_60_accField) + Long.valueOf(sl_60_allFields)));
+        allFields = StringUtils.setFieldInConcatString(allFields, "\\|", "session_count",
+                String.valueOf(Long.valueOf(session_count_accField) + Long.valueOf(session_count_allFields)));
+        // 返回allFields
+        return allFields;
+    }
+
 	public static void main(String[] args) {
 		String str = ",,aaa,,";
 		System.out.println(trimComma(str));
