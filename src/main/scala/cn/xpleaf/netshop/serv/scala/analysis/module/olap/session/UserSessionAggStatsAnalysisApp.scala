@@ -2,6 +2,7 @@ package cn.xpleaf.netshop.serv.scala.analysis.module.olap.session
 
 import cn.xpleaf.netshop.serv.java.analysis.dao.{ITaskDao, TaskDaoImpl}
 import cn.xpleaf.netshop.serv.java.analysis.domain.Task
+import cn.xpleaf.netshop.serv.java.analysis.domain.session.SessionTimeStepAgg
 import cn.xpleaf.netshop.serv.java.analysis.utils.{DateUtils, ParamUtil, StringUtils, ValidationUtils}
 import cn.xpleaf.netshop.serv.scala.analysis.accumulator.SessionTimeStepAggAccumulator
 import org.apache.spark.rdd.RDD
@@ -178,6 +179,7 @@ object UserSessionAggStatsAnalysisApp {
           * 10m~30m、30m以上各个范围内的session占比；访问步长在1~3、4~6、7~9、10~30、30~60、60以上各个
           * 范围内的session占比
           */
+        /** 7.1 方法一：使用自定义累加器（不推荐）*/
         // 先初始化一个累加器，因为统计后的数据都保存在累加器中
         val initialValue =
             s"td_1s_3s=0|" +
@@ -198,8 +200,13 @@ object UserSessionAggStatsAnalysisApp {
             s"session_count=0|"
         val sessionTimeStepAggAccumulator = sc.accumulator[String](initialValue)(new SessionTimeStepAggAccumulator)
         // 调用方法进行统计
-        calculateTimeStepOperation(filteredSessionId2FullAggInfoRDD, sessionTimeStepAggAccumulator)
+        //calculateTimeStepOperation(filteredSessionId2FullAggInfoRDD, sessionTimeStepAggAccumulator)
         println("-------------------------->sessionTimeStepAggAccumulator's value: " + sessionTimeStepAggAccumulator.value)
+
+        /** 7.2 方法二：将filteredSessionId2FullAggInfoRDD转换为RDD[(timeKey或stepKey, 1)]，再使用reduceByKey */
+        val sessionTimeStepAgg:SessionTimeStepAgg = calculateTimeStepOperation2(filteredSessionId2FullAggInfoRDD)
+        sessionTimeStepAgg.setValue("session_count", filteredSessionId2FullAggInfoRDD.count().toInt)
+        println("-------------------------->sessionTimeStepAgg's value: " + sessionTimeStepAgg)
 
         // 关闭SparkContext
         sc.stop()
@@ -209,6 +216,98 @@ object UserSessionAggStatsAnalysisApp {
     /*================================================上面是main方法，下面是内部使用方法================================================*/
 
     /**
+      * 7.2 方法二：将filteredSessionId2FullAggInfoRDD转换为RDD[(time_key或stepKey, 1)]，再使用reduceByKey
+      * 统计出访问时长在1s~3s、4s~6s、7s~9s、10s~30s、30s~60s、1m~3m、3m~10m、
+      * 10m~30m、30m以上各个范围内的session占比；访问步长在1~3、4~6、7~9、10~30、30~60、60以上各个
+      * 范围内的session占比
+      */
+    def calculateTimeStepOperation2(filteredSessionId2FullAggInfoRDD: RDD[(String, String)]):SessionTimeStepAgg = {
+        val sessionTimeStepAgg = new SessionTimeStepAgg()
+        /** 统计访问时长 */
+        // 先转换为RDD[(timeKey, 1)]
+        val timeKeyRDD:RDD[(String, Int)] = filteredSessionId2FullAggInfoRDD.map{
+            case (sessionId, fullAggInfo) =>
+                // 拿到访问时长
+                val visitLength: Int = StringUtils.getFieldFromConcatString(fullAggInfo, "\\|", "visit_length").toInt
+                // 找到访问时长范围
+                var timeKey:String = null
+                if (visitLength >= 1 && visitLength <= 3) {
+                    timeKey = "td_1s_3s"
+                } else if (visitLength >= 4 && visitLength <= 6) {
+                    timeKey = "td_4s_6s"
+                } else if (visitLength >= 7 && visitLength <= 9) {
+                    timeKey = "td_7s_9s"
+                } else if (visitLength >= 10 && visitLength <= 30) {
+                    timeKey = "td_10s_30s"
+                } else if (visitLength > 30 && visitLength <= 60) {
+                    timeKey = "td_30s_60s"
+                } else if (visitLength > 60 && visitLength <= 180) {
+                    timeKey = "td_1m_3m"
+                } else if (visitLength > 180 && visitLength <= 600) {
+                    timeKey = "td_3m_10m"
+                } else if (visitLength > 600 && visitLength <= 1800) {
+                    timeKey = "td_10m_30m"
+                } else if (visitLength > 1800) {
+                    timeKey = "td_30m"
+                } else {
+                    timeKey = "td_0s"
+                }
+
+                // 不要返回null，否则后面reduceByKey会有问题，也就是timeKeyRDD会有为null，这样reduceByKey时就有出现空指针异常
+                (timeKey, 1)
+        }
+        // timeKeyRDD.take(10).foreach(println)
+        // reduceByKey
+        val timeKeyReduceRetRDD = timeKeyRDD.reduceByKey(_+_)
+        // println("-------------------------->timeKeyReduceRet's value: ")
+        // 必须要使用take拉到driver上，否则sessionTimeStepAgg是在不同的节点上进行操作的
+        // 这样的话就需要使用累加器，显然麻烦了
+        // 同时这样有个好处，sessionTimeStepAgg不用实现序列化接口也可以使用了，因为不用发送到不同节点上
+        timeKeyReduceRetRDD.take(10).foreach{
+            case (timeKey, value) =>
+                sessionTimeStepAgg.setValue(timeKey, value)
+        }
+
+
+        /** 统计访问步长 */
+        // 先转换为RDD[(stepKey, 1)]
+        val stepKeyRDD:RDD[(String, Int)] = filteredSessionId2FullAggInfoRDD.map{
+            case (sessionId, fullAggInfo) =>
+                // 拿到访问步长
+                val stepLength: Int = StringUtils.getFieldFromConcatString(fullAggInfo, "\\|", "step_length").toInt
+                // 找出访问步长的范围
+                var stepKey:String = null
+                if(stepLength >= 1 && stepLength <= 3) {
+                    stepKey = "sl_1_3"
+                } else if (stepLength >= 4 && stepLength <= 6) {
+                    stepKey = "sl_4_6"
+                } else if (stepLength >= 7 && stepLength <= 9) {
+                    stepKey = "sl_7_9"
+                } else if (stepLength >= 10 && stepLength <= 30) {
+                    stepKey = "sl_10_30"
+                } else if (stepLength > 30 && stepLength <= 60) {
+                    stepKey = "sl_30_60"
+                } else if (stepLength > 60) {
+                    stepKey = "sl_60"
+                } else {                // 还是加上，因为时长计算的竟然有0
+                    stepKey = "sl_0"
+                }
+
+                (stepKey, 1)
+        }
+        // reduceByKey
+        val stepKeyReduceRetRDD = stepKeyRDD.reduceByKey(_+_)
+        // println("-------------------------->stepKeyReduceRet's value: ")
+        stepKeyReduceRetRDD.take(10).foreach{
+            case (stepKey, value) =>
+                sessionTimeStepAgg.setValue(stepKey, value)
+        }
+
+        sessionTimeStepAgg
+    }
+
+    /**
+      * 7.1 方法一：使用自定义累加器
       * 统计出访问时长在1s~3s、4s~6s、7s~9s、10s~30s、30s~60s、1m~3m、3m~10m、
       * 10m~30m、30m以上各个范围内的session占比；访问步长在1~3、4~6、7~9、10~30、30~60、60以上各个
       * 范围内的session占比
