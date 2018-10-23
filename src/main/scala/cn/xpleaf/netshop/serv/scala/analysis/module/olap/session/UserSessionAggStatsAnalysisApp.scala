@@ -2,8 +2,8 @@ package cn.xpleaf.netshop.serv.scala.analysis.module.olap.session
 
 import cn.xpleaf.netshop.serv.java.analysis.dao.{ITaskDao, TaskDaoImpl}
 import cn.xpleaf.netshop.serv.java.analysis.domain.Task
-import cn.xpleaf.netshop.serv.java.analysis.domain.session.SessionTimeStepAgg
-import cn.xpleaf.netshop.serv.java.analysis.utils.{DateUtils, ParamUtil, StringUtils, ValidationUtils}
+import cn.xpleaf.netshop.serv.java.analysis.domain.session.{SessionTimeStepAgg, SessionTimeStepAggRatio}
+import cn.xpleaf.netshop.serv.java.analysis.utils._
 import cn.xpleaf.netshop.serv.scala.analysis.accumulator.SessionTimeStepAggAccumulator
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{DataFrame, Row}
@@ -208,6 +208,14 @@ object UserSessionAggStatsAnalysisApp {
         sessionTimeStepAgg.setValue("session_count", filteredSessionId2FullAggInfoRDD.count().toInt)
         println("-------------------------->sessionTimeStepAgg's value: " + sessionTimeStepAgg)
 
+        // 计算时长和步长各范围的session占比
+        val sessionTimeStepAggRatio:SessionTimeStepAggRatio = genSessionTimeStepAggRatio(sessionTimeStepAgg, taskID)
+        println("-------------------------->sessionTimeStepAggRatio's value: " + sessionTimeStepAggRatio)
+
+        // 再通过dao写入数据库
+        //--------------------------------------------------------------------------------------------//
+
+
         // 关闭SparkContext
         sc.stop()
 
@@ -215,6 +223,71 @@ object UserSessionAggStatsAnalysisApp {
 
     /*================================================上面是main方法，下面是内部使用方法================================================*/
 
+    /**
+      * 计算时长和步长各范围的session占比
+      */
+    def genSessionTimeStepAggRatio(sessionTimeStepAgg: SessionTimeStepAgg, taskID: Int):SessionTimeStepAggRatio = {
+        val td_1s_3s = sessionTimeStepAgg.getTd_1s_3s
+        val td_4s_6s = sessionTimeStepAgg.getTd_4s_6s
+        val td_7s_9s = sessionTimeStepAgg.getTd_7s_9s
+        val td_10s_30s = sessionTimeStepAgg.getTd_10s_30s
+        val td_30s_60s = sessionTimeStepAgg.getTd_30s_60s
+        val td_1m_3m = sessionTimeStepAgg.getTd_1m_3m
+        val td_3m_10m = sessionTimeStepAgg.getTd_3m_10m
+        val td_10m_30m = sessionTimeStepAgg.getTd_10m_30m
+        val td_30m = sessionTimeStepAgg.getTd_30m
+
+        val sl_1_3 = sessionTimeStepAgg.getSl_1_3
+        val sl_4_6 = sessionTimeStepAgg.getSl_4_6
+        val sl_7_9 = sessionTimeStepAgg.getSl_7_9
+        val sl_10_30 = sessionTimeStepAgg.getSl_10_30
+        val sl_30_60 = sessionTimeStepAgg.getSl_30_60
+        val sl_60 = sessionTimeStepAgg.getSl_60
+
+        val sessionCount = sessionTimeStepAgg.getSession_count
+
+        // 计算时长和步长各范围的百分比
+        val ratio_td_1s_3s = NumberUtils.formatDouble(td_1s_3s / (sessionCount * 1.0), 2)
+        val ratio_td_4s_6s = NumberUtils.formatDouble(td_4s_6s / (sessionCount * 1.0), 2)
+        val ratio_td_7s_9s = NumberUtils.formatDouble(td_7s_9s / (sessionCount * 1.0), 2)
+        val ratio_td_10s_30s = NumberUtils.formatDouble(td_10s_30s / (sessionCount * 1.0), 2)
+        val ratio_td_30s_60s = NumberUtils.formatDouble(td_30s_60s / (sessionCount * 1.0), 2)
+        val ratio_td_1m_3m = NumberUtils.formatDouble(td_1m_3m / (sessionCount * 1.0), 2)
+        val ratio_td_3m_10m = NumberUtils.formatDouble(td_3m_10m / (sessionCount * 1.0), 2)
+        val ratio_td_10m_30m = NumberUtils.formatDouble(td_10m_30m / (sessionCount * 1.0), 2)
+        val ratio_td_30m = NumberUtils.formatDouble(td_30m / (sessionCount * 1.0), 2)
+
+        val ratio_sl_1_3 = NumberUtils.formatDouble(sl_1_3 / (sessionCount * 1.0), 2)
+        val ratio_sl_4_6 = NumberUtils.formatDouble(sl_4_6 / (sessionCount * 1.0), 2)
+        val ratio_sl_7_9 = NumberUtils.formatDouble(sl_7_9 / (sessionCount * 1.0), 2)
+        val ratio_sl_10_30 = NumberUtils.formatDouble(sl_10_30 / (sessionCount * 1.0), 2)
+        val ratio_sl_30_60 = NumberUtils.formatDouble(sl_30_60 / (sessionCount * 1.0), 2)
+        val ratio_sl_60 = NumberUtils.formatDouble(sl_60 / (sessionCount * 1.0), 2)
+
+        // 构造SessionTimeStepAggRatio对象
+        val sts = new SessionTimeStepAggRatio
+        sts.setTask_id(taskID)
+        sts.setSession_count(sessionCount)
+        sts.setVisit_length_1s_3s_ratio(ratio_td_1s_3s)
+        sts.setVisit_length_4s_6s_ratio(ratio_td_4s_6s)
+        sts.setVisit_length_7s_9s_ratio(ratio_td_7s_9s)
+        sts.setVisit_length_10s_30s_ratio(ratio_td_10s_30s)
+        sts.setVisit_length_30s_60s_ratio(ratio_td_30s_60s)
+        sts.setVisit_length_1m_3m_ratio(ratio_td_1m_3m)
+        sts.setVisit_length_3m_10m_ratio(ratio_td_3m_10m)
+        sts.setVisit_length_10m_30m_ratio(ratio_td_10m_30m)
+        sts.setVisit_length_30m_ratio(ratio_td_30m)
+
+        sts.setStep_length_1_3_ratio(ratio_sl_1_3)
+        sts.setStep_length_4_6_ratio(ratio_sl_4_6)
+        sts.setStep_length_7_9_ratio(ratio_sl_7_9)
+        sts.setStep_length_10_30_ratio(ratio_sl_10_30)
+        sts.setStep_length_30_60_ratio(ratio_sl_30_60)
+        sts.setStep_length_60_ratio(ratio_sl_60)
+        
+        sts
+    }
+    
     /**
       * 7.2 方法二：将filteredSessionId2FullAggInfoRDD转换为RDD[(time_key或stepKey, 1)]，再使用reduceByKey
       * 统计出访问时长在1s~3s、4s~6s、7s~9s、10s~30s、30s~60s、1m~3m、3m~10m、
